@@ -1,0 +1,8 @@
+[package]
+name = "roguelike_tut"
+version = "0.1.0"
+authors = ["ilya"]
+edition = "2018"
+
+[dependencies]
+tcod = "0.15"
