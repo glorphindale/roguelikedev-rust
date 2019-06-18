@@ -29,8 +29,8 @@ fn handle_keys(root: &mut Root, player_x: &mut i32, player_y: &mut i32) -> bool 
 
 fn main() {
     let mut root = Root::initializer()
-        .font("arial10x10.png", FontLayout::Tcod)
-        .font_type(FontType::Greyscale)
+        .font("Cheepicus_15x15.png", FontLayout::AsciiInRow)
+        .font_type(FontType::Default)
         .size(SCREEN_WIDTH, SCREEN_HEIGHT)
         .title("Roguelikedev tutorial in Rust")
         .init();
