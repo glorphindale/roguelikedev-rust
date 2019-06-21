@@ -50,7 +50,7 @@ fn main() {
              1.0,
              1.0);
         root.flush();
-        root.wait_for_keypress(true);
+
         let exit = handle_keys(&mut root, &mut player_x, &mut player_y);
         if exit {
             break
