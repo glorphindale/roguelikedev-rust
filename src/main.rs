@@ -18,15 +18,16 @@ struct Object {
 #[derive(Clone, Copy, Debug)]
 struct Tile {
     blocked: bool,
-    block_sight: bool
+    block_sight: bool,
+    explored: bool,
 }
 
 impl Tile {
     pub fn empty() -> Self {
-        Tile{ blocked: false, block_sight: false }
+        Tile{ blocked: false, block_sight: false, explored: false, }
     }
     pub fn wall() -> Self {
-        Tile{ blocked: true, block_sight: true }
+        Tile{ blocked: true, block_sight: true, explored: false, }
     }
 }
 
@@ -173,7 +174,7 @@ fn handle_keys(root: &mut Root, player: &mut Object, map: &Map) -> bool {
     false
 }
 
-fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &Map, fov_map: &mut FovMap, fov_recompute: bool) {
+fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &mut Map, fov_map: &mut FovMap, fov_recompute: bool) {
     if fov_recompute {
         let player = &objects[0];
         fov_map.compute_fov(player.x, player.y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
@@ -190,7 +191,13 @@ fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &Ma
                 (true, false) => COLOR_LIGHT_GROUND,
                 (true, true) => COLOR_LIGHT_WALL,
             };
-            con.set_char_background(x, y, color, BackgroundFlag::Set);
+            let explored = &mut map[x as usize][y as usize].explored;
+            if visible {
+                *explored = true;
+            }
+            if *explored {
+                con.set_char_background(x, y, color, BackgroundFlag::Set);
+            }
         }
     }
     for object in objects {
@@ -217,7 +224,7 @@ fn main() {
 
     let mut con = Offscreen::new(MAP_WIDTH, MAP_HEIGHT);
 
-    let (map, (px, py)) = make_map();
+    let (mut map, (px, py)) = make_map();
     let player = Object::new(px, py, '@', WHITE);
     let mut objects = [player];
 
@@ -239,7 +246,7 @@ fn main() {
 
         let fov_recompute = previous_player_pos != (objects[0].x, objects[0].y);
 
-        render_all(&mut root, &mut con, &objects, &map, &mut fov_map, fov_recompute);
+        render_all(&mut root, &mut con, &objects, &mut map, &mut fov_map, fov_recompute);
 
         let player = &mut objects[0];
         previous_player_pos = (player.x, player.y);
