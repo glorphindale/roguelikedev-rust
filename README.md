@@ -18,3 +18,7 @@ Use font arial10x10.png for simple ASCII (taken from tcod fonts).
 Run:
 
 > cargo run --release
+
+### TODO
+
+* Allow font selection from arguments
