@@ -8,6 +8,17 @@ const MAP_WIDTH: i32 = 80;
 const MAP_HEIGHT: i32 = 45;
 const PLAYER: usize = 0;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fighter {
+    max_hp: i32,
+    hp: i32,
+    defence: i32,
+    power: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AI;
+
 #[derive(Debug)]
 struct Object {
     name: String,
@@ -17,49 +28,8 @@ struct Object {
     color: Color,
     blocks: bool,
     alive: bool,
-}
-
-impl Object {
-    pub fn new(name: &str, x: i32, y: i32, char: char, color: Color, blocks: bool) -> Self {
-        Object {
-            name: name.into(),
-            x: x, y: y,
-            char: char,
-            color: color,
-            blocks: blocks,
-            alive: false
-        }
-    }
-
-    pub fn draw(&self, con: &mut Console) {
-        con.set_default_foreground(self.color);
-        con.put_char(self.x, self.y, self.char, BackgroundFlag::None);
-    }
-
-    pub fn pos(&self) -> (i32, i32) {
-        (self.x, self.y)
-    }
-
-    pub fn set_pos(&mut self, x: i32, y: i32) {
-        self.x = x;
-        self.y = y;
-    }
-}
-
-fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
-    if map[x as usize][y as usize].blocked {
-        return true;
-    }
-    objects.iter().any(|object| {
-        object.blocks && object.pos() == (x, y)
-    })
-}
-
-fn move_by(id: usize, dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
-    let (x, y) = objects[id].pos();
-    if !is_blocked(x+dx, y+dy, map, objects) {
-        objects[id].set_pos(x+dx, y+dy);
-    }
+    fighter: Option<Fighter>,
+    ai: Option<AI>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +49,71 @@ impl Tile {
 }
 
 type Map = Vec<Vec<Tile>>;
+
+
+impl Object {
+    pub fn new(name: &str, x: i32, y: i32, char: char, color: Color, blocks: bool) -> Self {
+        Object {
+            name: name.into(),
+            x: x, y: y,
+            char: char,
+            color: color,
+            blocks: blocks,
+            alive: false,
+            fighter: None,
+            ai: None,
+        }
+    }
+
+    pub fn draw(&self, con: &mut Console) {
+        con.set_default_foreground(self.color);
+        con.put_char(self.x, self.y, self.char, BackgroundFlag::None);
+    }
+
+    pub fn pos(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+
+    pub fn set_pos(&mut self, x: i32, y: i32) {
+        self.x = x;
+        self.y = y;
+    }
+
+    pub fn distance_to(&self, other: &Object) -> f32 {
+        let dx = other.x - self.x;
+        let dy = other.y - self.y;
+        ((dx.pow(2) + dy.pow(2)) as f32).sqrt()
+    }
+}
+
+fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
+    if map[x as usize][y as usize].blocked {
+        return true;
+    }
+    objects.iter().any(|object| {
+        object.blocks && object.pos() == (x, y)
+    })
+}
+
+fn move_by(id: usize, dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
+    let (x, y) = objects[id].pos();
+    if !is_blocked(x+dx, y+dy, map, objects) {
+        objects[id].set_pos(x+dx, y+dy);
+    }
+}
+
+fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], fov_map: &FovMap) {
+    let (monster_x, monster_y) = objects[monster_id].pos();
+    if fov_map.is_in_fov(monster_x, monster_y) {
+        if objects[monster_id].distance_to(&objects[PLAYER]) >= 2.0 {
+            let (player_x, player_y) = objects[PLAYER].pos();
+            move_towards(monster_id, player_x, player_y, map, objects);
+        } else if objects[PLAYER].fighter.map_or(false, |f| f.hp > 0) {
+            let monster = &objects[monster_id];
+            println!("{} attacks, but shiny metal armor bounces it back!", monster.name);
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct Rect {
@@ -179,15 +214,32 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map) {
     for _ in 0..num_monsters {
         let x = rand::thread_rng().gen_range(room.x1 + 1, room.x2);
         let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
-        if !is_blocked(x, y, map, objects) {
-            let mut monster = if rand::random::<f32>() < 0.8 {
-                Object::new("Orc", x, y, '0', DESATURATED_GREEN, true)
-            } else {
-                Object::new("Troll", x, y, 'T', DARKER_GREEN, true)
-            };
-            monster.alive = true;
-            objects.push(monster);
+        if is_blocked(x, y, map, objects) {
+            continue;
         }
+        let mut monster = if rand::random::<f32>() < 0.8 {
+            let mut orc = Object::new("Orc", x, y, '0', DESATURATED_GREEN, true);
+            orc.fighter = Some(Fighter {
+                max_hp: 10,
+                hp: 10,
+                defence: 0,
+                power: 3,
+            });
+            orc.ai = Some(AI);
+            orc
+        } else {
+            let mut troll = Object::new("Troll", x, y, 'T', DARKER_GREEN, true);
+            troll.fighter = Some(Fighter {
+                max_hp: 16,
+                hp: 16,
+                defence: 1,
+                power: 4,
+            });
+            troll.ai = Some(AI);
+            troll
+        };
+        monster.alive = true;
+        objects.push(monster);
     }
 }
 
@@ -211,6 +263,16 @@ fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
             move_by(PLAYER, dx, dy, map, objects)
         }
     }
+}
+
+fn move_towards(id: usize, target_x: i32, target_y: i32, map: &Map, objects: &mut [Object]) {
+    let dx = target_x - objects[id].x;
+    let dy = target_y - objects[id].y;
+    let distance = ((dx.pow(2) + dy.pow(2)) as f32).sqrt();
+
+    let dx = (dx as f32 / distance).round() as i32;
+    let dy = (dy as f32 / distance).round() as i32;
+    move_by(id, dx, dy, map, objects);
 }
 
 ///////////////////////////////// UI Work
@@ -310,6 +372,13 @@ fn main() {
 
     let mut player = Object::new("Player", 0, 0, '@', WHITE, true);
     player.alive = true;
+    player.fighter = Some(Fighter {
+        max_hp: 30,
+        hp: 30,
+        defence: 2,
+        power: 5,
+    });
+
     let mut objects = vec![player];
     let (mut map, (px, py)) = make_map(&mut objects);
     objects[PLAYER].set_pos(px, py);
@@ -342,9 +411,9 @@ fn main() {
         }
 
         if objects[PLAYER].alive && player_action != PlayerAction::DidntTakeTurn {
-            for object in &objects {
-                if (object as *const _) != (&objects[PLAYER] as *const _) {
-                    println!("The {} growls!", object.name);
+            for id in 0..objects.len() {
+                if objects[id].ai.is_some() {
+                    ai_take_turn(id, &map, &mut objects, &fov_map);
                 }
             }
         }
