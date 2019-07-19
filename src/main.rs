@@ -95,6 +95,9 @@ impl Object {
     }
 
     pub fn set_pos(&mut self, x: i32, y: i32) {
+        if x < 0 || y < 0 || x > MAP_WIDTH || x > MAP_HEIGHT {
+            return
+        }
         self.x = x;
         self.y = y;
     }
@@ -163,6 +166,9 @@ fn monster_death(monster: &mut Object, messages: &mut Messages) {
 }
 
 fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
+    if x < 0 || y < 0 {
+        return false;
+    }
     if map[x as usize][y as usize].blocked {
         return true;
     }
@@ -188,6 +194,17 @@ fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], fov_map: &
             let (monster, player) = mut_two(monster_id, PLAYER, objects);
             monster.attack(player, messages);
         }
+    } else {
+        let choices = [-1, 0, 1];
+        let tx = match rand::thread_rng().choose(&choices) {
+            Some(dx) => monster_x + dx,
+            _ => monster_x,
+        };
+        let ty = match rand::thread_rng().choose(&choices) {
+            Some(dy) => monster_y + dy,
+            _ => monster_y,
+        };
+        move_towards(monster_id, tx, ty, map, objects);
     }
 }
 
@@ -360,7 +377,12 @@ fn move_towards(id: usize, target_x: i32, target_y: i32, map: &Map, objects: &mu
 
     let dx = (dx as f32 / distance).round() as i32;
     let dy = (dy as f32 / distance).round() as i32;
-    move_by(id, dx, dy, map, objects);
+    // Add some drift to help monsters move around the corners
+    if rand::random() {
+        move_by(id, dx, dy, map, objects);
+    } else {
+        move_by(id, dy, dx, map, objects);
+    }
 }
 
 ///////////////////////////////// UI Work
