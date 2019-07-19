@@ -2,6 +2,7 @@ use std::cmp;
 use rand::Rng;
 use tcod::colors;
 use tcod::console::*;
+use tcod::input::{self, Key, Event, Mouse};
 use tcod::map::{FovAlgorithm, Map as FovMap};
 
 const MAP_WIDTH: i32 = 80;
@@ -378,12 +379,11 @@ const MSG_HEIGHT: usize = PANEL_HEIGHT as usize - 1;
 
 const LIMIT_FPS: i32 = 60;
 
-fn handle_keys(root: &mut Root, objects: &mut [Object], map: &Map, messages: &mut Messages) -> PlayerAction {
+fn handle_keys(key: Key, root: &mut Root, objects: &mut [Object], map: &Map, messages: &mut Messages) -> PlayerAction {
     use PlayerAction::*;
     use tcod::input::Key;
     use tcod::input::KeyCode::*;
 
-    let key = root.wait_for_keypress(true);
     let alive = objects[0].alive;
     let action = match (key, alive) {
         (Key { code: Enter, alt: true, .. }, _) => {
@@ -411,6 +411,24 @@ fn handle_keys(root: &mut Root, objects: &mut [Object], map: &Map, messages: &mu
         _ => DidntTakeTurn,
     };
     action
+}
+
+fn get_names_under_mouse(mouse: Mouse, objects: &[Object], fov_map: &FovMap) -> String {
+    let (x, y) = (mouse.cx as i32, mouse.cy as i32);
+
+    let names = objects
+        .iter()
+        .filter(|obj| {obj.pos() == (x, y) && fov_map.is_in_fov(obj.x, obj.y)})
+        .map(|obj| obj.name.clone())
+        .collect::<Vec<_>>();
+
+    if names.len() > 0 {
+        let names_str = names.join(", ").to_string();
+        let result = "You see ".to_owned() + &names_str;
+        result
+    } else {
+        "".to_string()
+    }
 }
 
 fn render_bar(
@@ -449,7 +467,8 @@ fn render_all(root: &mut Root,
               map: &mut Map,
               messages: &Messages,
               fov_map: &mut FovMap,
-              fov_recompute: bool
+              fov_recompute: bool,
+              mouse: Mouse
 ) {
     if fov_recompute {
         let player = &objects[PLAYER];
@@ -519,6 +538,14 @@ fn render_all(root: &mut Root,
                colors::DARKER_RED
     );
 
+    // Draw names under mouse
+    panel.set_default_foreground(colors::LIGHT_GREY);
+    panel.print_ex(1, 0,
+                   BackgroundFlag::None,
+                   TextAlignment::Left,
+                   get_names_under_mouse(mouse, objects, fov_map)
+    );
+
     blit(panel,
          (0, 0),
          (SCREEN_WIDTH, PANEL_HEIGHT),
@@ -578,6 +605,9 @@ fn main() {
         }
     }
 
+    let mut mouse = Default::default();
+    let mut key = Default::default();
+
     let mut messages = vec![];
     message(&mut messages,
             "Welcome stranger! Prepare to perish in the Sewers of the Damned!",
@@ -590,6 +620,12 @@ fn main() {
 
         let fov_recompute = previous_player_pos != (objects[PLAYER].x, objects[PLAYER].y);
 
+        match input::check_for_event(input::MOUSE | input::KEY_PRESS) {
+            Some((_, Event::Mouse(m))) => mouse = m,
+            Some((_, Event::Key(k))) => key = k,
+            _ => key = Default::default(),
+        }
+
         render_all(&mut root,
                    &mut con,
                    &mut panel,
@@ -597,11 +633,13 @@ fn main() {
                    &mut map,
                    &messages,
                    &mut fov_map,
-                   fov_recompute);
+                   fov_recompute,
+                   mouse
+        );
 
         let player = &mut objects[PLAYER];
         previous_player_pos = (player.x, player.y);
-        let player_action = handle_keys(&mut root, &mut objects, &map, &mut messages);
+        let player_action = handle_keys(key, &mut root, &mut objects, &map, &mut messages);
         if player_action == PlayerAction::Exit {
             break
         }
