@@ -9,16 +9,21 @@
 
 Builds requires libsdl2-dev.
 
+Font Bisasam_16x16.png taken from [Dwarf Fortress wiki](https://dwarffortresswiki.org/index.php/File:Bisasam_16x16.png).
 Font Cheepicus_15x15.png taken from [Dwarf Fortress wiki](https://dwarffortresswiki.org/Tileset_repository).
-Use font arial10x10.png for simple ASCII (taken from tcod fonts).
+Font courier12x12_aa_tc taken from [libtcod-rs](https://github.com/bhelyer/libtcod-d/tree/master/data/fonts)
 
 
-###
+### Usage
 
 Run:
 
-> cargo run --release
+> cargo run --release  # to use default tcod font
+> cargo run FONT_NAME  # to use some other font
 
 ### TODO
 
-* Allow font selection from arguments
+
+### Bugs
+
+* Player can be generated on the same tile as monster

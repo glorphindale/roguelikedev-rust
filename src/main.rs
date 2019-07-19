@@ -446,8 +446,16 @@ fn render_all(root: &mut Root, con: &mut Offscreen, objects: &[Object], map: &mu
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    let args_len = args.len();
+    let (font_name, font_layout) = match args_len {
+        2 => (args[1].to_string(), FontLayout::AsciiInRow),
+        _ => ("courier12x12_aa_tc.png".to_string(), FontLayout::Tcod)
+    };
+
     let mut root = Root::initializer()
-        .font("Cheepicus_15x15.png", FontLayout::AsciiInRow)
+        .font(font_name, font_layout)
         .font_type(FontType::Default)
         .size(SCREEN_WIDTH, SCREEN_HEIGHT)
         .title("Roguelikedev tutorial in Rust")
