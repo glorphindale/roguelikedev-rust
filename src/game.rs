@@ -49,8 +49,15 @@ struct Fighter {
     on_death: DeathCallback,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct AI;
+#[derive(Clone, Debug, PartialEq)]
+enum Ai {
+    Basic,
+    Confused {
+        previous_ai: Box<Ai>,
+        num_turns: i32,
+    },
+}
+
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum DeathCallback {
@@ -62,11 +69,8 @@ enum DeathCallback {
 enum Item {
     Heal,
     Lightning,
+    Confuse,
 }
-
-const HEAL_AMOUNT: i32 = 10;
-const LIGHTNING_RANGE: i32 = 5;
-const LIGHTNING_DAMAGE: i32 = 20;
 
 #[derive(Debug)]
 struct Object {
@@ -78,7 +82,7 @@ struct Object {
     blocks: bool,
     alive: bool,
     fighter: Option<Fighter>,
-    ai: Option<AI>,
+    ai: Option<Ai>,
     item: Option<Item>,
 }
 
@@ -107,7 +111,7 @@ impl Object {
     }
 
     pub fn set_pos(&mut self, x: i32, y: i32) {
-        if x < 0 || y < 0 || x > MAP_WIDTH || x > MAP_HEIGHT {
+        if x < 0 || y < 0 || x > MAP_WIDTH || y > MAP_HEIGHT {
             return
         }
         self.x = x;
@@ -205,7 +209,37 @@ fn move_by(id: usize, dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
     }
 }
 
+type Messages = Vec<(String, colors::Color)>;
+
+fn message<T: Into<String>>(messages: &mut Messages, message: T, color: colors::Color) {
+    if messages.len() == MSG_HEIGHT {
+        messages.remove(0);
+    }
+    messages.push((message.into(), color));
+}
+
 fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], fov_map: &FovMap, messages: &mut Messages) {
+    use Ai::*;
+
+    if let Some(ai) = objects[monster_id].ai.take() {
+        let new_ai = match ai {
+            Basic => ai_basic(monster_id, map, objects, fov_map, messages),
+            Confused {
+                previous_ai,
+                num_turns,
+            } => ai_confused(monster_id, map, objects, messages, previous_ai, num_turns),
+        };
+        objects[monster_id].ai = Some(new_ai);
+    }
+}
+
+fn ai_basic(
+    monster_id: usize,
+    map: &Map,
+    objects: &mut [Object],
+    fov_map: &FovMap,
+    messages: &mut Messages,
+) -> Ai {
     let (monster_x, monster_y) = objects[monster_id].pos();
     if fov_map.is_in_fov(monster_x, monster_y) {
         if objects[monster_id].distance_to(&objects[PLAYER]) >= 2.0 {
@@ -227,15 +261,33 @@ fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], fov_map: &
         };
         move_towards(monster_id, tx, ty, map, objects);
     }
+    Ai::Basic
 }
 
-type Messages = Vec<(String, colors::Color)>;
-
-fn message<T: Into<String>>(messages: &mut Messages, message: T, color: colors::Color) {
-    if messages.len() == MSG_HEIGHT {
-        messages.remove(0);
+fn ai_confused(
+    monster_id: usize,
+    map: &Map,
+    objects: &mut [Object],
+    messages: &mut Messages,
+    previous_ai: Box<Ai>,
+    num_turns: i32,
+) -> Ai {
+    if num_turns < 0 {
+        message(messages, format!("{} is no longer confused!", objects[monster_id].name),
+            colors::RED);
+        *previous_ai
+    } else {
+        move_by(monster_id,
+                rand::thread_rng().gen_range(-1, 2),
+                rand::thread_rng().gen_range(-1, 2),
+                map,
+                objects,
+        );
+        Ai::Confused {
+            previous_ai: previous_ai,
+            num_turns: num_turns - 1,
+        }
     }
-    messages.push((message.into(), color));
 }
 
 //////////////////////// MAPGEN
@@ -287,10 +339,9 @@ fn create_v_tunnel(x: i32, y1: i32, y2: i32, map: &mut Map) {
     }
 }
 
-fn make_map(objects: &mut Vec<Object>) -> (Map, (i32, i32)) {
+fn make_map(objects: &mut Vec<Object>) -> Map {
     let mut map = vec![vec![Tile::wall(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
     let mut rooms = vec![];
-    let mut starting_position = (0, 0);
     for _ in 0..MAX_ROOMS {
         let w = rand::thread_rng().gen_range(ROOM_MIN_SIZE, ROOM_MAX_SIZE + 1);
         let h = rand::thread_rng().gen_range(ROOM_MIN_SIZE, ROOM_MAX_SIZE + 1);
@@ -306,7 +357,7 @@ fn make_map(objects: &mut Vec<Object>) -> (Map, (i32, i32)) {
             create_room(new_room, &mut map, objects);
             let (new_x, new_y) = new_room.center();
             if rooms.is_empty() {
-                starting_position = (new_x, new_y);
+                objects[PLAYER].set_pos(new_x, new_y);
             } else {
                 let (prev_x, prev_y) = rooms[rooms.len() - 1].center();
 
@@ -324,13 +375,19 @@ fn make_map(objects: &mut Vec<Object>) -> (Map, (i32, i32)) {
             rooms.push(new_room);
         }
     }
-    (map, starting_position)
+    map
 }
 
 /////////////////////// Logic
 const FOV_ALGO: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
 const TORCH_RADIUS: i32 = 10;
+
+const HEAL_AMOUNT: i32 = 10;
+const LIGHTNING_RANGE: i32 = 5;
+const LIGHTNING_DAMAGE: i32 = 20;
+const CONFUSE_RANGE: i32 = 10;
+const CONFUSE_NUM_TURNS: i32 = 8;
 
 fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map) {
     let num_monsters = rand::thread_rng().gen_range(0, MAX_ROOM_MONSTERS + 1);
@@ -350,7 +407,7 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map) {
                 power: 3,
                 on_death: DeathCallback::Monster,
             });
-            orc.ai = Some(AI);
+            orc.ai = Some(Ai::Basic);
             orc
         } else {
             let mut troll = Object::new("Troll", x, y, 'T', colors::DARKER_GREEN, true);
@@ -361,7 +418,7 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map) {
                 power: 4,
                 on_death: DeathCallback::Monster,
             });
-            troll.ai = Some(AI);
+            troll.ai = Some(Ai::Basic);
             troll
         };
         monster.alive = true;
@@ -380,10 +437,15 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map) {
                                              '!', colors::VIOLET, false);
                 object.item = Some(Item::Heal);
                 object
-            } else {
+            } else if dice < 0.7 + 0.15 {
                 let mut object = Object::new("scroll of lightning", x, y,
                                              '#', colors::LIGHT_YELLOW, false);
                 object.item = Some(Item::Lightning);
+                object
+            } else {
+                let mut object = Object::new("scroll of confusion", x, y,
+                                             '&', colors::LIGHT_YELLOW, false);
+                object.item = Some(Item::Confuse);
                 object
             };
             objects.push(item);
@@ -510,6 +572,31 @@ fn cast_lightning(
     }
 }
 
+fn cast_confuse(
+    _inventory_id: usize,
+    objects: &mut [Object],
+    messages: &mut Messages,
+    tcod: &mut Tcod,
+) -> UseResult {
+    let monster_id = closest_monster(CONFUSE_RANGE, objects, tcod);
+    if let Some(monster_id) = monster_id {
+        let old_ai = objects[monster_id].ai.take().unwrap_or(Ai::Basic);
+        objects[monster_id].ai = Some(Ai::Confused {
+            previous_ai: Box::new(old_ai),
+            num_turns: CONFUSE_NUM_TURNS,
+        });
+        message(
+            messages,
+            format!("{} starts stumbling around!", objects[monster_id].name),
+            colors::LIGHT_GREEN,
+        );
+        UseResult::UsedUp
+    } else {
+        message(messages, "No enemy is close enought to strike.", colors::RED);
+        UseResult::Cancelled
+    }
+}
+
 fn use_item(
     inventory_id: usize,
     inventory: &mut Vec<Object>,
@@ -522,6 +609,7 @@ fn use_item(
         let on_use = match item {
             Heal => cast_heal,
             Lightning => cast_lightning,
+            Confuse => cast_confuse,
         };
         match on_use(inventory_id, objects, messages, tcod) {
             UseResult::UsedUp => {
@@ -860,8 +948,7 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
     });
 
     let mut objects = vec![player];
-    let (mut map, (px, py)) = make_map(&mut objects);
-    objects[PLAYER].set_pos(px, py);
+    let mut map = make_map(&mut objects);
 
     let mut inventory = vec![];
 
