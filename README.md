@@ -27,3 +27,4 @@ Run:
 ### Bugs
 
 * Player can be generated on the same tile as monster
+* Player sometime is generated in the upper-left corner unable to move
