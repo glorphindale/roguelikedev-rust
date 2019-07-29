@@ -590,10 +590,14 @@ fn cast_confuse(
     _inventory_id: usize,
     objects: &mut [Object],
     messages: &mut Messages,
-    _map: &mut Map,
+    map: &mut Map,
     tcod: &mut Tcod,
 ) -> UseResult {
-    let monster_id = closest_monster(CONFUSE_RANGE, objects, tcod);
+    message(
+        messages,
+        "Left click an enemy to confuse it, or right click to cancel.",
+        colors::LIGHT_CYAN);
+    let monster_id = target_monster(tcod, objects, map, messages, Some(CONFUSE_RANGE as f32));
     if let Some(monster_id) = monster_id {
         let old_ai = objects[monster_id].ai.take().unwrap_or(Ai::Basic);
         objects[monster_id].ai = Some(Ai::Confused {
@@ -672,6 +676,21 @@ fn use_item(
                 format!("The {} cannot be used.", inventory[inventory_id].name),
                 colors::WHITE);
     }
+}
+
+fn drop_item(
+    inventory_id: usize,
+    inventory: &mut Vec<Object>,
+    objects: &mut Vec<Object>,
+    messages: &mut Messages,
+) {
+    let mut item = inventory.remove(inventory_id);
+    item.set_pos(objects[PLAYER].x, objects[PLAYER].y);
+    message(
+        messages,
+        format!("You dropped a {}.", item.name),
+        colors::YELLOW);
+    objects.push(item);
 }
 
 ///////////////////////////////// UI Work
@@ -754,6 +773,16 @@ fn handle_keys(key: Key,
             }
             DidntTakeTurn
         }
+        (Key {printable: 'd', .. }, true) => {
+            let inventory_index = inventory_menu(
+                inventory,
+                "Select and item to drop\n",
+                &mut tcod.root);
+            if let Some(inventory_index) = inventory_index {
+                drop_item(inventory_index, inventory, objects, messages);
+            }
+            DidntTakeTurn
+        }
         _ => DidntTakeTurn,
     };
     action
@@ -793,6 +822,27 @@ fn target_tile(
         let escape = key.map_or(false, |k| k.code == Escape);
         if tcod.mouse.rbutton_pressed || escape {
             return None
+        }
+    }
+}
+
+fn target_monster(
+    tcod: &mut Tcod,
+    objects: &[Object],
+    map: &mut Map,
+    messages: &Messages,
+    max_range: Option<f32>,
+) -> Option<usize> {
+    loop {
+        match target_tile(tcod, objects, map, messages, max_range) {
+            Some((x, y)) => {
+                for (id, obj) in objects.iter().enumerate() {
+                    if obj.pos() == (x, y) && obj.fighter.is_some() && id != PLAYER {
+                        return Some(id);
+                    }
+                }
+            },
+            None => return None,
         }
     }
 }
