@@ -146,14 +146,14 @@ impl Object {
     pub fn attack(&mut self, target: &mut Object, messages: &mut Messages) {
         let damage = self.fighter.map_or(0, |f| f.power) - target.fighter.map_or(0, |f| f.defence);
         if damage > 0 {
-            message(messages,
-                    format!("{} swings and hits {} for {} damage!", self.name, target.name, damage),
-                    colors::WHITE);
+            messages.add(
+                format!("{} swings and hits {} for {} damage!", self.name, target.name, damage),
+                colors::WHITE);
             target.take_damage(damage, messages);
         } else {
-            message(messages,
-                    format!("{} attacks the {} but it has no effect!", self.name, target.name),
-                    colors::WHITE);
+            messages.add(
+                format!("{} attacks the {} but it has no effect!", self.name, target.name),
+                colors::WHITE);
         }
     }
 
@@ -167,6 +167,25 @@ impl Object {
     }
 }
 
+type Messages = Vec<(String, colors::Color)>;
+
+struct Game {
+    map: Map,
+    log: Messages,
+    inventory: Vec<Object>,
+}
+
+trait MessageLog {
+    fn add<T: Into<String>>(&mut self, message: T, color: colors::Color);
+}
+
+impl MessageLog for Messages {
+    fn add<T: Into<String>>(&mut self, message: T, color: colors::Color) {
+        self.push((message.into(), color));
+    }
+}
+
+
 impl DeathCallback {
     fn callback(self, object: &mut Object, messages: &mut Messages) {
         use DeathCallback::*;
@@ -179,14 +198,14 @@ impl DeathCallback {
 }
 
 fn player_death(player: &mut Object, messages: &mut Messages) {
-    message(messages, "You die!", colors::RED);
+    messages.add("You die!", colors::RED);
 
     player.char = '%';
     player.color = colors::DARK_RED;
 }
 
 fn monster_death(monster: &mut Object, messages: &mut Messages) {
-    message(messages, format!("{} dies!", monster.name), colors::ORANGE);
+    messages.add(format!("{} dies!", monster.name), colors::ORANGE);
     monster.char = '%';
     monster.color = colors::DARK_RED;
     monster.blocks = false;
@@ -214,25 +233,16 @@ fn move_by(id: usize, dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
     }
 }
 
-type Messages = Vec<(String, colors::Color)>;
-
-fn message<T: Into<String>>(messages: &mut Messages, message: T, color: colors::Color) {
-    if messages.len() == MSG_HEIGHT {
-        messages.remove(0);
-    }
-    messages.push((message.into(), color));
-}
-
-fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], fov_map: &FovMap, messages: &mut Messages) {
+fn ai_take_turn(monster_id: usize, game: &mut Game, objects: &mut [Object], fov_map: &FovMap) {
     use Ai::*;
 
     if let Some(ai) = objects[monster_id].ai.take() {
         let new_ai = match ai {
-            Basic => ai_basic(monster_id, map, objects, fov_map, messages),
+            Basic => ai_basic(monster_id, game, objects, fov_map),
             Confused {
                 previous_ai,
                 num_turns,
-            } => ai_confused(monster_id, map, objects, messages, previous_ai, num_turns),
+            } => ai_confused(monster_id, game, objects, previous_ai, num_turns),
         };
         objects[monster_id].ai = Some(new_ai);
     }
@@ -240,19 +250,18 @@ fn ai_take_turn(monster_id: usize, map: &Map, objects: &mut [Object], fov_map: &
 
 fn ai_basic(
     monster_id: usize,
-    map: &Map,
+    game: &mut Game,
     objects: &mut [Object],
     fov_map: &FovMap,
-    messages: &mut Messages,
 ) -> Ai {
     let (monster_x, monster_y) = objects[monster_id].pos();
     if fov_map.is_in_fov(monster_x, monster_y) {
         if objects[monster_id].distance_to(&objects[PLAYER]) >= 2.0 {
             let (player_x, player_y) = objects[PLAYER].pos();
-            move_towards(monster_id, player_x, player_y, map, objects);
+            move_towards(monster_id, player_x, player_y, &game.map, objects);
         } else if objects[PLAYER].fighter.map_or(false, |f| f.hp > 0) {
             let (monster, player) = mut_two(monster_id, PLAYER, objects);
-            monster.attack(player, messages);
+            monster.attack(player, &mut game.log);
         }
     } else {
         let choices = [-1, 0, 1];
@@ -264,28 +273,27 @@ fn ai_basic(
             Some(dy) => monster_y + dy,
             _ => monster_y,
         };
-        move_towards(monster_id, tx, ty, map, objects);
+        move_towards(monster_id, tx, ty, &game.map, objects);
     }
     Ai::Basic
 }
 
 fn ai_confused(
     monster_id: usize,
-    map: &Map,
+    game: &mut Game,
     objects: &mut [Object],
-    messages: &mut Messages,
     previous_ai: Box<Ai>,
     num_turns: i32,
 ) -> Ai {
     if num_turns < 0 {
-        message(messages, format!("{} is no longer confused!", objects[monster_id].name),
+        game.log.add(format!("{} is no longer confused!", objects[monster_id].name),
             colors::RED);
         *previous_ai
     } else {
         move_by(monster_id,
                 rand::thread_rng().gen_range(-1, 2),
                 rand::thread_rng().gen_range(-1, 2),
-                map,
+                &mut game.map,
                 objects,
         );
         Ai::Confused {
@@ -468,20 +476,15 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map) {
 fn pick_item_up(
     object_id: usize,
     objects: &mut Vec<Object>,
-    inventory: &mut Vec<Object>,
-    messages: &mut Messages,
+    game: &mut Game,
 ) {
-    if inventory.len() >= 26 {
-        message(messages,
-                format!("Your inventory is full, cannot pick up {}.",
-                        objects[object_id].name),
-                colors::RED);
+    if game.inventory.len() >= 26 {
+        game.log.add(format!("Your inventory is full, cannot pick up {}.", objects[object_id].name),
+                     colors::RED);
     } else {
         let item = objects.swap_remove(object_id);
-        message(messages,
-                format!("You picked up a {}!", item.name),
-                colors::GREEN);
-        inventory.push(item);
+        game.log.add(format!("You picked up a {}!", item.name), colors::GREEN);
+        game.inventory.push(item);
     }
 }
 
@@ -492,7 +495,7 @@ enum PlayerAction {
     Exit,
 }
 
-fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object], messages: &mut Messages) {
+fn player_move_or_attack(dx: i32, dy: i32, game: &mut Game, objects: &mut [Object]) {
     let x = objects[PLAYER].x + dx;
     let y = objects[PLAYER].y + dy;
 
@@ -500,10 +503,10 @@ fn player_move_or_attack(dx: i32, dy: i32, map: &Map, objects: &mut [Object], me
     match target_id {
         Some(target_id) => {
             let (player, monster) = mut_two(PLAYER, target_id, objects);
-            player.attack(monster, messages);
+            player.attack(monster, &mut game.log);
         }
         None => {
-            move_by(PLAYER, dx, dy, map, objects)
+            move_by(PLAYER, dx, dy, &mut game.map, objects)
         }
     }
 }
@@ -547,17 +550,16 @@ enum UseResult {
 
 fn cast_heal(
     _inventory_id: usize,
+    game: &mut Game,
     objects: &mut [Object],
-    messages: &mut Messages,
-    _map: &mut Map,
     _tcod: &mut Tcod
 ) -> UseResult {
     if let Some(fighter) = objects[PLAYER].fighter {
         if fighter.hp == fighter.max_hp {
-            message(messages, "You are already at full health.", colors::RED);
+            game.log.add("You are already at full health.", colors::RED);
             return UseResult::Cancelled;
         }
-        message(messages, "Your wounds are healing!", colors::LIGHT_VIOLET);
+        game.log.add("Your wounds are healing!", colors::LIGHT_VIOLET);
         objects[PLAYER].heal(HEAL_AMOUNT);
         return UseResult::UsedUp;
     }
@@ -566,81 +568,75 @@ fn cast_heal(
 
 fn cast_lightning(
     _inventory_id: usize,
+    game: &mut Game,
     objects: &mut [Object],
-    messages: &mut Messages,
-    _map: &mut Map,
     tcod: &mut Tcod,
 ) -> UseResult {
     let monster_id = closest_monster(LIGHTNING_RANGE, objects, tcod);
     if let Some(monster_id) = monster_id {
-        message(messages,
-                format!("A lightning strikes {} with a loud thunder for {} damage!",
-                        objects[monster_id].name, LIGHTNING_DAMAGE),
+        game.log.add(format!("A lightning strikes {} with a loud thunder for {} damage!",
+                             objects[monster_id].name, LIGHTNING_DAMAGE),
                 colors::LIGHT_BLUE,
         );
-        objects[monster_id].take_damage(LIGHTNING_DAMAGE, messages);
+        objects[monster_id].take_damage(LIGHTNING_DAMAGE, &mut game.log);
         UseResult::UsedUp
     } else {
-        message(messages, "No enemy is close enough to strike.", colors::RED);
+        game.log.add("No enemy is close enough to strike.", colors::RED);
         UseResult::Cancelled
     }
 }
 
 fn cast_confuse(
     _inventory_id: usize,
+    game: &mut Game,
     objects: &mut [Object],
-    messages: &mut Messages,
-    map: &mut Map,
     tcod: &mut Tcod,
 ) -> UseResult {
-    message(
-        messages,
+    game.log.add(
         "Left click an enemy to confuse it, or right click to cancel.",
         colors::LIGHT_CYAN);
-    let monster_id = target_monster(tcod, objects, map, messages, Some(CONFUSE_RANGE as f32));
+    let monster_id = target_monster(tcod, game, objects, Some(CONFUSE_RANGE as f32));
     if let Some(monster_id) = monster_id {
         let old_ai = objects[monster_id].ai.take().unwrap_or(Ai::Basic);
         objects[monster_id].ai = Some(Ai::Confused {
             previous_ai: Box::new(old_ai),
             num_turns: CONFUSE_NUM_TURNS,
         });
-        message(
-            messages,
+        game.log.add(
             format!("{} starts stumbling around!", objects[monster_id].name),
             colors::LIGHT_GREEN,
         );
         UseResult::UsedUp
     } else {
-        message(messages, "No enemy is close enought to strike.", colors::RED);
+        game.log.add("No enemy is close enought to strike.", colors::RED);
         UseResult::Cancelled
     }
 }
 
 fn cast_fireball(
     _inventory_id: usize,
+    game: &mut Game,
     objects: &mut [Object],
-    messages: &mut Messages,
-    map: &mut Map,
     tcod: &mut Tcod,
 ) -> UseResult {
-    message(messages, "Left click to target tile for the fireball, right click to cancel",
-            colors::LIGHT_CYAN);
-    let (x, y) = match target_tile(tcod, objects, map, messages, None) {
+    game.log.add(
+        "Left click to target tile for the fireball, right click to cancel",
+        colors::LIGHT_CYAN);
+    let (x, y) = match target_tile(tcod, game, objects, None) {
         Some(tile_pos) => tile_pos,
         None => return UseResult::Cancelled,
     };
 
-    message(
-        messages,
+    game.log.add(
         format!("The fireball explodes, burning everything within {} tiles!", FIREBALL_RADIUS),
         colors::ORANGE);
 
     for obj in objects {
         if obj.distance(x, y) <= FIREBALL_RADIUS as f32 && obj.fighter.is_some() {
-            message(messages,
-                    format!("The {} gets burned for {} hit points.", obj.name, FIREBALL_DAMAGE),
-                    colors::ORANGE);
-            obj.take_damage(FIREBALL_DAMAGE, messages);
+            game.log.add(
+                format!("The {} gets burned for {} hit points.", obj.name, FIREBALL_DAMAGE),
+                colors::ORANGE);
+            obj.take_damage(FIREBALL_DAMAGE, &mut game.log);
         }
     }
     UseResult::UsedUp
@@ -648,48 +644,42 @@ fn cast_fireball(
 
 fn use_item(
     inventory_id: usize,
-    inventory: &mut Vec<Object>,
+    game: &mut Game,
     objects: &mut [Object],
-    messages: &mut Messages,
-    map: &mut Map,
     tcod: &mut Tcod,
 ) {
     use Item::*;
-    if let Some(item) = inventory[inventory_id].item {
+    if let Some(item) = game.inventory[inventory_id].item {
         let on_use = match item {
             Heal => cast_heal,
             Lightning => cast_lightning,
             Confuse => cast_confuse,
             Fireball => cast_fireball,
         };
-        match on_use(inventory_id, objects, messages, map, tcod) {
+        match on_use(inventory_id, game, objects, tcod) {
             UseResult::UsedUp => {
                 // destroy after use
-                inventory.remove(inventory_id);
+                game.inventory.remove(inventory_id);
             }
             UseResult::Cancelled => {
-                message(messages, "Cancelled", colors::WHITE);
+                game.log.add("Cancelled", colors::WHITE);
             }
         }
     } else {
-        message(messages,
-                format!("The {} cannot be used.", inventory[inventory_id].name),
-                colors::WHITE);
+        game.log.add(
+            format!("The {} cannot be used.", game.inventory[inventory_id].name),
+            colors::WHITE);
     }
 }
 
 fn drop_item(
     inventory_id: usize,
-    inventory: &mut Vec<Object>,
+    game: &mut Game,
     objects: &mut Vec<Object>,
-    messages: &mut Messages,
 ) {
-    let mut item = inventory.remove(inventory_id);
+    let mut item = game.inventory.remove(inventory_id);
     item.set_pos(objects[PLAYER].x, objects[PLAYER].y);
-    message(
-        messages,
-        format!("You dropped a {}.", item.name),
-        colors::YELLOW);
+    game.log.add(format!("You dropped a {}.", item.name), colors::YELLOW);
     objects.push(item);
 }
 
@@ -721,9 +711,7 @@ struct Tcod {
 fn handle_keys(key: Key,
                tcod: &mut Tcod,
                objects: &mut Vec<Object>,
-               map: &mut Map,
-               messages: &mut Messages,
-               inventory: &mut Vec<Object>,
+               game: &mut Game,
 ) -> PlayerAction {
     use PlayerAction::*;
     use tcod::input::Key;
@@ -738,19 +726,19 @@ fn handle_keys(key: Key,
         }
         (Key { code: Escape, .. }, _) => return Exit,
         (Key { code: Up, .. }, true) => {
-            player_move_or_attack(0, -1, map, objects, messages);
+            player_move_or_attack(0, -1, game, objects);
             TookTurn
         }
         (Key { code: Down, .. }, true) => {
-            player_move_or_attack(0, 1, map, objects, messages);
+            player_move_or_attack(0, 1, game, objects);
             TookTurn
         }
         (Key { code: Left, .. }, true) => {
-            player_move_or_attack(-1, 0, map, objects, messages);
+            player_move_or_attack(-1, 0, game, objects);
             TookTurn
         }
         (Key { code: Right, .. }, true) => {
-            player_move_or_attack(1, 0, map, objects, messages);
+            player_move_or_attack(1, 0, game, objects);
             TookTurn
         }
         (Key {printable: 'g', .. }, true) => {
@@ -759,27 +747,27 @@ fn handle_keys(key: Key,
                 .position(|object| object.pos() == objects[PLAYER].pos() &&
                           object.item.is_some());
             if let Some(item_id) = item_id {
-                pick_item_up(item_id, objects, inventory, messages);
+                pick_item_up(item_id, objects, game);
             }
             DidntTakeTurn
         }
         (Key {printable: 'i', .. }, true) => {
             let inventory_index = inventory_menu(
-                inventory,
+                &game.inventory,
                 "Press the key next to an item to use it, any other to cancel.\n",
                 &mut tcod.root);
             if let Some(inventory_index) = inventory_index {
-                use_item(inventory_index, inventory, objects, messages, map, tcod);
+                use_item(inventory_index, game, objects, tcod);
             }
             DidntTakeTurn
         }
         (Key {printable: 'd', .. }, true) => {
             let inventory_index = inventory_menu(
-                inventory,
+                &game.inventory,
                 "Select and item to drop\n",
                 &mut tcod.root);
             if let Some(inventory_index) = inventory_index {
-                drop_item(inventory_index, inventory, objects, messages);
+                drop_item(inventory_index, game, objects);
             }
             DidntTakeTurn
         }
@@ -792,9 +780,8 @@ fn handle_keys(key: Key,
 /// or (None, None) if right-clicked
 fn target_tile(
     tcod: &mut Tcod,
+    game: &mut Game,
     objects: &[Object],
-    map: &mut Map,
-    messages: &Messages,
     max_range: Option<f32>,
 ) -> Option<(i32, i32)> {
     use tcod::input::KeyCode::Escape;
@@ -809,7 +796,7 @@ fn target_tile(
             Some(Event::Key(k)) => key = Some(k),
             None => {},
         }
-        render_all(tcod, objects, map, messages, false);
+        render_all(tcod, objects, game, false);
         let (x, y) = (tcod.mouse.cx as i32, tcod.mouse.cy as i32);
 
         // accept the target if the player clicked in fov, filter by range is specified
@@ -828,13 +815,12 @@ fn target_tile(
 
 fn target_monster(
     tcod: &mut Tcod,
+    game: &mut Game,
     objects: &[Object],
-    map: &mut Map,
-    messages: &Messages,
     max_range: Option<f32>,
 ) -> Option<usize> {
     loop {
-        match target_tile(tcod, objects, map, messages, max_range) {
+        match target_tile(tcod, game, objects, max_range) {
             Some((x, y)) => {
                 for (id, obj) in objects.iter().enumerate() {
                     if obj.pos() == (x, y) && obj.fighter.is_some() && id != PLAYER {
@@ -963,8 +949,7 @@ fn render_bar(
 
 fn render_all(tcod: &mut Tcod,
               objects: &[Object],
-              map: &mut Map,
-              messages: &Messages,
+              game: &mut Game,
               fov_recompute: bool,
 ) {
     if fov_recompute {
@@ -975,7 +960,7 @@ fn render_all(tcod: &mut Tcod,
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
             let visible = tcod.fov.is_in_fov(x, y);
-            let wall = map[x as usize][y as usize].block_sight;
+            let wall = game.map[x as usize][y as usize].block_sight;
             let color = match (visible, wall) {
                 // Outside of FOV
                 (false, true) => COLOR_DARK_WALL,
@@ -984,7 +969,7 @@ fn render_all(tcod: &mut Tcod,
                 (true, false) => COLOR_LIGHT_GROUND,
                 (true, true) => COLOR_LIGHT_WALL,
             };
-            let explored = &mut map[x as usize][y as usize].explored;
+            let explored = &mut game.map[x as usize][y as usize].explored;
             if visible {
                 *explored = true;
             }
@@ -1014,7 +999,7 @@ fn render_all(tcod: &mut Tcod,
     tcod.panel.clear();
 
     let mut y = MSG_HEIGHT as i32;
-    for &(ref msg, color) in messages.iter().rev() {
+    for &(ref msg, color) in game.log.iter().rev() {
         let msg_height = tcod.panel.get_height_rect(MSG_X, y, MSG_WIDTH, 0, msg);
         y -= msg_height;
         if y < 0 {
@@ -1083,9 +1068,11 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
     });
 
     let mut objects = vec![player];
-    let mut map = make_map(&mut objects);
-
-    let mut inventory = vec![];
+    let mut game = Game {
+        map: make_map(&mut objects),
+        log: vec![],
+        inventory: vec![],
+    };
 
     let mut previous_player_pos = (-1, -1);
     for y in 0..MAP_HEIGHT {
@@ -1093,18 +1080,17 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
             tcod.fov.set(
                 x,
                 y,
-                !map[x as usize][y as usize].block_sight,
-                !map[x as usize][y as usize].blocked
+                !game.map[x as usize][y as usize].block_sight,
+                !game.map[x as usize][y as usize].blocked
             );
         }
     }
 
     let mut key = Default::default();
 
-    let mut messages = vec![];
-    message(&mut messages,
-            "Welcome stranger! Prepare to perish in the Sewers of the Damned!",
-            colors::RED);
+    game.log.add(
+        "Welcome stranger! Prepare to perish in the Sewers of the Damned!",
+        colors::RED);
 
     while !tcod.root.window_closed() {
         tcod.con.clear();
@@ -1120,8 +1106,7 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
 
         render_all(&mut tcod,
                    &objects,
-                   &mut map,
-                   &messages,
+                   &mut game,
                    fov_recompute,
         );
 
@@ -1130,9 +1115,7 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
         let player_action = handle_keys(key,
                                         &mut tcod,
                                         &mut objects,
-                                        &mut map,
-                                        &mut messages,
-                                        &mut inventory);
+                                        &mut game);
         if player_action == PlayerAction::Exit {
             break
         }
@@ -1140,7 +1123,7 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
         if objects[PLAYER].alive && player_action != PlayerAction::DidntTakeTurn {
             for id in 0..objects.len() {
                 if objects[id].ai.is_some() {
-                    ai_take_turn(id, &map, &mut objects, &tcod.fov, &mut messages);
+                    ai_take_turn(id, &mut game, &mut objects, &tcod.fov);
                 }
             }
         }
