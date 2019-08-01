@@ -1040,23 +1040,22 @@ fn render_all(tcod: &mut Tcod,
     // Output
     tcod.root.flush();
 }
-pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
-    let root = Root::initializer()
-        .font(font_name, font_layout)
-        .font_type(FontType::Default)
-        .size(SCREEN_WIDTH, SCREEN_HEIGHT)
-        .title("Roguelikedev tutorial in Rust")
-        .init();
-    tcod::system::set_fps(LIMIT_FPS);
 
-    let mut tcod = Tcod {
-        root: root,
-        con: Offscreen::new(MAP_WIDTH, MAP_HEIGHT),
-        panel: Offscreen::new(SCREEN_WIDTH, PANEL_HEIGHT),
-        fov: FovMap::new(MAP_WIDTH, MAP_HEIGHT),
-        mouse: Default::default(),
-    };
+fn initialise_fov(tcod: &mut Tcod, map: &Map)
+{
+    for y in 0..MAP_HEIGHT {
+        for x in 0..MAP_WIDTH {
+            tcod.fov.set(
+                x,
+                y,
+                !map[x as usize][y as usize].block_sight,
+                !map[x as usize][y as usize].blocked
+            );
+        }
+    }
+}
 
+fn new_game(tcod: &mut Tcod) -> (Vec<Object>, Game) {
     let mut player = Object::new("Player", 0, 0, '@', colors::WHITE, true);
     player.alive = true;
     player.fighter = Some(Fighter {
@@ -1074,23 +1073,18 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
         inventory: vec![],
     };
 
-    let mut previous_player_pos = (-1, -1);
-    for y in 0..MAP_HEIGHT {
-        for x in 0..MAP_WIDTH {
-            tcod.fov.set(
-                x,
-                y,
-                !game.map[x as usize][y as usize].block_sight,
-                !game.map[x as usize][y as usize].blocked
-            );
-        }
-    }
-
-    let mut key = Default::default();
+    initialise_fov(tcod, &game.map);
 
     game.log.add(
         "Welcome stranger! Prepare to perish in the Sewers of the Damned!",
         colors::RED);
+
+    (objects, game)
+}
+
+fn play_game(objects: &mut Vec<Object>, game: &mut Game, tcod: &mut Tcod) {
+    let mut previous_player_pos = (-1, -1);
+    let mut key = Default::default();
 
     while !tcod.root.window_closed() {
         tcod.con.clear();
@@ -1104,18 +1098,11 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
             _ => key = Default::default(),
         }
 
-        render_all(&mut tcod,
-                   &objects,
-                   &mut game,
-                   fov_recompute,
-        );
+        render_all(tcod, &objects, game, fov_recompute);
 
         let player = &mut objects[PLAYER];
         previous_player_pos = (player.x, player.y);
-        let player_action = handle_keys(key,
-                                        &mut tcod,
-                                        &mut objects,
-                                        &mut game);
+        let player_action = handle_keys(key, tcod, objects, game);
         if player_action == PlayerAction::Exit {
             break
         }
@@ -1123,9 +1110,30 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
         if objects[PLAYER].alive && player_action != PlayerAction::DidntTakeTurn {
             for id in 0..objects.len() {
                 if objects[id].ai.is_some() {
-                    ai_take_turn(id, &mut game, &mut objects, &tcod.fov);
+                    ai_take_turn(id, game, objects, &tcod.fov);
                 }
             }
         }
     }
+}
+
+pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
+    let root = Root::initializer()
+        .font(font_name, font_layout)
+        .font_type(FontType::Default)
+        .size(SCREEN_WIDTH, SCREEN_HEIGHT)
+        .title("Roguelikedev tutorial in Rust")
+        .init();
+    tcod::system::set_fps(LIMIT_FPS);
+
+    let mut tcod = Tcod {
+        root: root,
+        con: Offscreen::new(MAP_WIDTH, MAP_HEIGHT),
+        panel: Offscreen::new(SCREEN_WIDTH, PANEL_HEIGHT),
+        fov: FovMap::new(MAP_WIDTH, MAP_HEIGHT),
+        mouse: Default::default(),
+    };
+
+    let (mut objects, mut game) = new_game(&mut tcod);
+    play_game(&mut objects, &mut game, &mut tcod);
 }
