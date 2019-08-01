@@ -331,13 +331,13 @@ impl Rect {
     }
 }
 
-fn create_room(room: Rect, map: &mut Map, objects: &mut Vec<Object>) {
+fn create_room(room: Rect, map: &mut Map, objects: &mut Vec<Object>, first_room: bool) {
     for x in (room.x1 + 1)..room.x2 {
         for y in (room.y1 + 1)..room.y2 {
             map[x as usize][y as usize] = Tile::empty();
         }
     }
-    place_objects(room, objects, map)
+    place_objects(room, objects, map, first_room)
 }
 
 fn create_h_tunnel(x1: i32, x2: i32, y: i32, map: &mut Map) {
@@ -367,7 +367,7 @@ fn make_map(objects: &mut Vec<Object>) -> Map {
             .any(|other_room| new_room.intersects_with(other_room));
 
         if !failed {
-            create_room(new_room, &mut map, objects);
+            create_room(new_room, &mut map, objects, rooms.is_empty());
             let (new_x, new_y) = new_room.center();
             if rooms.is_empty() {
                 objects[PLAYER].set_pos(new_x, new_y);
@@ -404,7 +404,42 @@ const CONFUSE_NUM_TURNS: i32 = 8;
 const FIREBALL_RADIUS: i32 = 3;
 const FIREBALL_DAMAGE: i32 = 12;
 
-fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map) {
+fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map, first_room: bool) {
+    let num_items = rand::thread_rng().gen_range(0, MAX_ROOM_ITEMS + 1);
+
+    for _ in 0..num_items {
+        let x = rand::thread_rng().gen_range(room.x1 + 1, room.x2);
+        let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
+        if !is_blocked(x, y, map, objects) {
+            let dice = rand::random::<f32>();
+            let item = if dice < 0.7 {
+                let mut object = Object::new("healing potion", x, y,
+                                             '!', colors::VIOLET, false);
+                object.item = Some(Item::Heal);
+                object
+            } else if dice < 0.7 + 0.1 {
+                let mut object = Object::new("scroll of lightning", x, y,
+                                             '#', colors::LIGHT_YELLOW, false);
+                object.item = Some(Item::Lightning);
+                object
+            } else if dice < 0.7 + 0.1 + 0.1 {
+                let mut object = Object::new("scroll of fireball", x, y,
+                                             '#', colors::LIGHT_YELLOW, false);
+                object.item = Some(Item::Fireball);
+                object
+            } else {
+                let mut object = Object::new("scroll of confusion", x, y,
+                                             '&', colors::LIGHT_YELLOW, false);
+                object.item = Some(Item::Confuse);
+                object
+            };
+            objects.push(item);
+        }
+    }
+
+    if first_room {
+        return
+    }
     let num_monsters = rand::thread_rng().gen_range(0, MAX_ROOM_MONSTERS + 1);
 
     for _ in 0..num_monsters {
@@ -438,38 +473,6 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map) {
         };
         monster.alive = true;
         objects.push(monster);
-    }
-
-    let num_items = rand::thread_rng().gen_range(0, MAX_ROOM_ITEMS + 1);
-
-    for _ in 0..num_items {
-        let x = rand::thread_rng().gen_range(room.x1 + 1, room.x2);
-        let y = rand::thread_rng().gen_range(room.y1 + 1, room.y2);
-        if !is_blocked(x, y, map, objects) {
-            let dice = rand::random::<f32>();
-            let item = if dice < 0.7 {
-                let mut object = Object::new("healing potion", x, y, 
-                                             '!', colors::VIOLET, false);
-                object.item = Some(Item::Heal);
-                object
-            } else if dice < 0.7 + 0.1 {
-                let mut object = Object::new("scroll of lightning", x, y,
-                                             '#', colors::LIGHT_YELLOW, false);
-                object.item = Some(Item::Lightning);
-                object
-            } else if dice < 0.7 + 0.1 + 0.1 {
-                let mut object = Object::new("scroll of fireball", x, y,
-                                             '#', colors::LIGHT_YELLOW, false);
-                object.item = Some(Item::Fireball);
-                object
-            } else {
-                let mut object = Object::new("scroll of confusion", x, y,
-                                             '&', colors::LIGHT_YELLOW, false);
-                object.item = Some(Item::Confuse);
-                object
-            };
-            objects.push(item);
-        }
     }
 }
 

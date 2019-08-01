@@ -25,5 +25,3 @@ Run:
 
 
 ### Bugs
-
-* Player can be generated on the same tile as monster
