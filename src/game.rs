@@ -5,6 +5,10 @@ use tcod::console::*;
 use tcod::input::{self, Key, Event, Mouse};
 use tcod::map::{FovAlgorithm, Map as FovMap};
 
+use std::io::{Read, Write};
+use std::fs::File;
+use std::error::Error;
+
 const MAP_WIDTH: i32 = 80;
 const MAP_HEIGHT: i32 = 43;
 const PLAYER: usize = 0;
@@ -22,7 +26,7 @@ fn mut_two<T>(first: usize, second: usize, items: &mut [T]) -> (&mut T, &mut T) 
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 struct Tile {
     blocked: bool,
     block_sight: bool,
@@ -40,7 +44,7 @@ impl Tile {
 
 type Map = Vec<Vec<Tile>>;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 struct Fighter {
     max_hp: i32,
     hp: i32,
@@ -49,7 +53,7 @@ struct Fighter {
     on_death: DeathCallback,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 enum Ai {
     Basic,
     Confused {
@@ -59,13 +63,13 @@ enum Ai {
 }
 
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum DeathCallback {
     Player,
     Monster,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 enum Item {
     Heal,
     Lightning,
@@ -73,7 +77,7 @@ enum Item {
     Fireball,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Object {
     name: String,
     x: i32,
@@ -169,6 +173,7 @@ impl Object {
 
 type Messages = Vec<(String, colors::Color)>;
 
+#[derive(Serialize, Deserialize)]
 struct Game {
     map: Map,
     log: Messages,
@@ -836,10 +841,29 @@ fn target_monster(
     }
 }
 
+fn save_game(objects: &[Object], game: &Game) -> Result<(), Box<Error>> {
+    let save_data = serde_json::to_string(&(objects, game))?;
+    let mut file = File::create("savegame")?;
+    file.write_all(save_data.as_bytes())?;
+    Ok(())
+}
+
+fn load_game() -> Result<(Vec<Object>, Game), Box<Error>> {
+    let mut json_save_state = String::new();
+    let mut file = File::open("savegame")?;
+    file.read_to_string(&mut json_save_state)?;
+    let result = serde_json::from_str::<(Vec<Object>, Game)>(&json_save_state)?;
+    Ok(result)
+}
+
 fn menu<T: AsRef<str>>(header: &str, options: &[T], width: i32, root: &mut Root) -> Option<usize> {
     assert!(options.len() <= 26, "Menu can only fit 26 options");
 
-    let header_height = root.get_height_rect(0, 0, width, SCREEN_HEIGHT, header);
+    let header_height = if header.is_empty() {
+        0
+    } else {
+        root.get_height_rect(0, 0, width, SCREEN_HEIGHT, header)
+    };
     let height = options.len() as i32 + header_height;
 
     // off-screen console representing the window
@@ -1044,8 +1068,7 @@ fn render_all(tcod: &mut Tcod,
     tcod.root.flush();
 }
 
-fn initialise_fov(tcod: &mut Tcod, map: &Map)
-{
+fn initialise_fov(tcod: &mut Tcod, map: &Map) {
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
             tcod.fov.set(
@@ -1056,6 +1079,7 @@ fn initialise_fov(tcod: &mut Tcod, map: &Map)
             );
         }
     }
+    tcod.con.clear(); // Clear the remnants of the previous games
 }
 
 fn new_game(tcod: &mut Tcod) -> (Vec<Object>, Game) {
@@ -1107,6 +1131,7 @@ fn play_game(objects: &mut Vec<Object>, game: &mut Game, tcod: &mut Tcod) {
         previous_player_pos = (player.x, player.y);
         let player_action = handle_keys(key, tcod, objects, game);
         if player_action == PlayerAction::Exit {
+            save_game(objects, game).ok().expect("Cannot save");
             break
         }
 
@@ -1120,12 +1145,52 @@ fn play_game(objects: &mut Vec<Object>, game: &mut Game, tcod: &mut Tcod) {
     }
 }
 
+fn msgbox(text: &str, width: i32, root: &mut Root) {
+    let options: &[&str] = &[];
+    menu(text, options, width, root);
+}
+
+fn main_menu(tcod: &mut Tcod) {
+    let img = tcod::image::Image::from_file("menu_background.png")
+        .ok()
+        .expect("Background image not found.");
+    while !tcod.root.window_closed() {
+        // Show the image at twice the resolution
+        tcod::image::blit_2x(&img, (0, 0), (-1, -1), &mut tcod.root, (0, 0));
+        let choices = &["Play a new game", "Continue last game", "Quit"];
+        let choice = menu("", choices, 24, &mut tcod.root);
+
+        match choice {
+            Some(0) => {
+                let (mut objects, mut game) = new_game(tcod);
+                play_game(&mut objects, &mut game, tcod);
+            }
+            Some(1) => {
+                match load_game() {
+                    Ok((mut objects, mut game)) => {
+                        initialise_fov(tcod, &game.map);
+                        play_game(&mut objects, &mut game, tcod);
+                    }
+                    Err(_e) => {
+                        msgbox("\nNo saved game to load.\n", 24, &mut tcod.root);
+                        continue;
+                    }
+                }
+            }
+            Some(2) => {
+                break;
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
     let root = Root::initializer()
         .font(font_name, font_layout)
         .font_type(FontType::Default)
         .size(SCREEN_WIDTH, SCREEN_HEIGHT)
-        .title("Roguelikedev tutorial in Rust")
+        .title("SEWERS OF THE DAMNED")
         .init();
     tcod::system::set_fps(LIMIT_FPS);
 
@@ -1137,6 +1202,21 @@ pub fn run_game(font_name: &str, font_layout: FontLayout) -> () {
         mouse: Default::default(),
     };
 
-    let (mut objects, mut game) = new_game(&mut tcod);
-    play_game(&mut objects, &mut game, &mut tcod);
+    tcod.root.set_default_foreground(colors::LIGHT_YELLOW);
+    tcod.root.print_ex(
+        SCREEN_WIDTH / 2,
+        SCREEN_HEIGHT / 2 - 4,
+        BackgroundFlag::None,
+        TextAlignment::Center,
+        "SEWERS OF THE DAMNED"
+    );
+    tcod.root.print_ex(
+        SCREEN_WIDTH / 2,
+        SCREEN_HEIGHT / 2,
+        BackgroundFlag::None,
+        TextAlignment::Center,
+        "By me",
+    );
+
+    main_menu(&mut tcod);
 }

@@ -1,4 +1,8 @@
 mod game;
+
+#[macro_use]
+extern crate serde_derive;
+
 use tcod::console::*;
 
 fn main() {
