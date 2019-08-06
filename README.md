@@ -3,7 +3,8 @@
 [Roguelikedev Does The Complete Roguelike Tutorial 2019](https://old.reddit.com/r/roguelikedev/comments/bz6s0j/roguelikedev_does_the_complete_roguelike_tutorial/)
 
 
-[Rust version of the tutorial](https://tomassedovic.github.io/roguelike-tutorial/part-2-object-map.html)
+[Rust version of the tutorial](https://tomassedovic.github.io/roguelike-tutorial/part-2-object-map.html) using tcod-rs.
+
 
 ### Requirements
 
@@ -21,7 +22,9 @@ Run:
 > cargo run --release  # to use default tcod font
 > cargo run FONT_NAME  # to use some other font
 
-### TODO
+### Known issues
+
+* Handling of "descend downstairs" looks bad (shift + ,), need to find a proper way.
 
 
 ### Bugs
