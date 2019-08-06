@@ -833,20 +833,40 @@ fn handle_keys(key: Key,
             DidntTakeTurn
         }
         (Key { code: Escape, .. }, _) => return Exit,
-        (Key { code: Up, .. }, true) => {
+        (Key { code: Up, .. }, true) | (Key { code: NumPad8, .. }, true) => {
             player_move_or_attack(0, -1, game, objects);
             TookTurn
         }
-        (Key { code: Down, .. }, true) => {
+        (Key { code: Down, .. }, true) | (Key { code: NumPad2, .. }, true) => {
             player_move_or_attack(0, 1, game, objects);
             TookTurn
         }
-        (Key { code: Left, .. }, true) => {
+        (Key { code: Left, .. }, true) | (Key { code: NumPad4, .. }, true) => {
             player_move_or_attack(-1, 0, game, objects);
             TookTurn
         }
-        (Key { code: Right, .. }, true) => {
+        (Key { code: Right, .. }, true) | (Key { code: NumPad6, .. }, true) => {
             player_move_or_attack(1, 0, game, objects);
+            TookTurn
+        }
+        (Key { code: Home, .. }, true) | (Key { code: NumPad7, .. }, true) => {
+            player_move_or_attack(-1, -1, game, objects);
+            TookTurn
+        }
+        (Key { code: PageUp, .. }, true) | (Key { code: NumPad9, .. }, true) => {
+            player_move_or_attack(1, -1, game, objects);
+            TookTurn
+        }
+        (Key { code: End, .. }, true) | (Key { code: NumPad1, .. }, true) => {
+            player_move_or_attack(-1, 1, game, objects);
+            TookTurn
+        }
+        (Key { code: PageDown, .. }, true) | (Key { code: NumPad3, .. }, true) => {
+            player_move_or_attack(1, 1, game, objects);
+            TookTurn
+        }
+        (Key { code: NumPad5, .. }, true) | (Key { code: Spacebar, .. }, true) => {
+            // Wait for a turn
             TookTurn
         }
         (Key {printable: 'g', .. }, true) => {
