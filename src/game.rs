@@ -77,6 +77,30 @@ enum Item {
     Lightning,
     Confuse,
     Fireball,
+    Equipment,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+struct Equipment {
+    slot: Slot,
+    equipped: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+enum Slot {
+    LeftHand,
+    RightHand,
+    Head,
+}
+
+impl std::fmt::Display for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match *self {
+            Slot::LeftHand => write!(f, "left hand"),
+            Slot::RightHand => write!(f, "right hand"),
+            Slot::Head => write!(f, "head"),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -95,6 +119,7 @@ struct Object {
     fighter: Option<Fighter>,
     ai: Option<Ai>,
     item: Option<Item>,
+    equipment: Option<Equipment>,
 
     level: i32,
 }
@@ -112,6 +137,7 @@ impl Object {
             fighter: None,
             ai: None,
             item: None,
+            equipment: None,
             level: 1,
         }
     }
@@ -181,6 +207,48 @@ impl Object {
             if fighter.hp > fighter.max_hp {
                 fighter.hp = fighter.max_hp;
             }
+        }
+    }
+
+    pub fn equip(&mut self, log: &mut Vec<(String, colors::Color)>) {
+        if self.item.is_none() {
+            log.add(format!("Can't equip {:?} as it is not an item.", self),
+                colors::RED,
+            );
+            return;
+        }
+        if let Some(ref mut equipment) = self.equipment {
+            if !equipment.equipped {
+                equipment.equipped = true;
+                log.add(format!("Equipped {} on {}.", self.name, equipment.slot),
+                    colors::LIGHT_GREEN,
+                );
+            }
+        } else {
+            log.add(format!("Can't equip {:?} as it is not an equipment.", self),
+                colors::RED,
+            );
+        }
+    }
+    
+    pub fn unequip(&mut self, log: &mut Vec<(String, colors::Color)>) {
+        if self.item.is_none() {
+            log.add(format!("Can't unequip {:?} as it's not an item", self),
+                colors::RED,
+            );
+            return;
+        }
+        if let Some(ref mut equipment) = self.equipment {
+            if equipment.equipped {
+                equipment.equipped = false;
+                log.add(format!("Unequipped {} on {}.", self.name, equipment.slot),
+                    colors::LIGHT_YELLOW,
+                );
+            }
+        } else {
+            log.add(format!("Can't unequip {:?} as it is not an equipment.", self),
+                colors::RED,
+            );
         }
     }
 }
@@ -456,6 +524,7 @@ const LEVEL_UP_FACTOR: i32 = 150;
 
 fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map, first_room: bool, level: u32) {
     let item_chances = &mut [
+        Weighted { item: Item::Equipment, weight: 100 },
         Weighted { item: Item::Heal, weight: 35 },
         Weighted { item: Item::Lightning,
                     weight: from_dungeon_level(
@@ -508,6 +577,12 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map, first_room: b
                     let mut object = Object::new("scroll of confusion", x, y,
                                                  '&', colors::LIGHT_YELLOW, false);
                     object.item = Some(Item::Confuse);
+                    object
+                }
+                Item::Equipment => {
+                    let mut object = Object::new("sword", x, y, '/', colors::SKY, false);
+                    object.item = Some(Item::Equipment);
+                    object.equipment = Some(Equipment{equipped: false, slot: Slot::RightHand});
                     object
                 }
             };
@@ -707,6 +782,7 @@ fn closest_monster(max_range: i32, objects: &mut [Object], tcod: &Tcod) -> Optio
 enum UseResult {
     UsedUp,
     Cancelled,
+    UsedAndKept,
 }
 
 fn cast_heal(
@@ -811,6 +887,19 @@ fn cast_fireball(
     UseResult::UsedUp
 }
 
+fn toggle_equipment(inventory_id: usize, game: &mut Game, _objects: &mut [Object], _tcod: &mut Tcod) -> UseResult {
+    let equipment = match game.inventory[inventory_id].equipment {
+        Some(equipment) => equipment,
+        None => return UseResult::Cancelled,
+    };
+    if equipment.equipped {
+        game.inventory[inventory_id].unequip(&mut game.log);
+    } else {
+        game.inventory[inventory_id].equip(& mut game.log);
+    }
+    UseResult::UsedAndKept
+}
+
 fn use_item(
     inventory_id: usize,
     game: &mut Game,
@@ -824,6 +913,7 @@ fn use_item(
             Lightning => cast_lightning,
             Confuse => cast_confuse,
             Fireball => cast_fireball,
+            Equipment => toggle_equipment,
         };
         match on_use(inventory_id, game, objects, tcod) {
             UseResult::UsedUp => {
@@ -833,6 +923,7 @@ fn use_item(
             UseResult::Cancelled => {
                 game.log.add("Cancelled", colors::WHITE);
             }
+            UseResult::UsedAndKept => {}
         }
     } else {
         game.log.add(
