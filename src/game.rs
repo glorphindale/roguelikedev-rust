@@ -236,7 +236,7 @@ impl Object {
             );
         }
     }
-    
+
     pub fn unequip(&mut self, log: &mut Vec<(String, colors::Color)>) {
         if self.item.is_none() {
             log.add(format!("Can't unequip {:?} as it's not an item", self),
@@ -265,7 +265,6 @@ impl Object {
             .iter()
             .map(|e| e.power_bonus)
             .sum();
-        println!("BASE {} bonus {}", base_power, bonus);
         base_power + bonus
     }
 
@@ -355,8 +354,8 @@ fn monster_death(monster: &mut Object, messages: &mut Messages) {
 }
 
 fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
-    if x < 0 || y < 0 {
-        return false;
+    if x < 0 || y < 0 || x >= MAP_WIDTH || y >= MAP_HEIGHT {
+        return true;
     }
     if map[x as usize][y as usize].blocked {
         return true;
@@ -479,11 +478,41 @@ impl Rect {
 }
 
 fn create_room(room: Rect, map: &mut Map, objects: &mut Vec<Object>, first_room: bool, level: u32) {
+    // Just a rectangle
     for x in (room.x1 + 1)..room.x2 {
         for y in (room.y1 + 1)..room.y2 {
             map[x as usize][y as usize] = Tile::empty();
         }
     }
+    // Let's add some chaos to the boring rectangular room
+    let wall_burrow = &mut [
+        Weighted { item: true, weight: 60 },
+        Weighted { item: false, weight: 40 },
+    ];
+    let wall_burrow_choice = WeightedChoice::new(wall_burrow);
+    let mut walls = vec![];
+    for x in (room.x1 + 1)..(room.x2 - 1) {
+        if x <= 0 || x >= MAP_WIDTH {
+            continue;
+        }
+        walls.push((x, room.y1));
+        walls.push((x, room.y2));
+    }
+    for y in (room.y1 + 1)..(room.y2 - 1) {
+        if y <= 0 || y >= MAP_HEIGHT {
+            continue;
+        }
+        walls.push((room.x1, y));
+        walls.push((room.x2, y));
+    }
+    for (wall_x, wall_y) in walls {
+        match wall_burrow_choice.ind_sample(&mut rand::thread_rng()) {
+            false => map[wall_x as usize][wall_y as usize] = Tile::empty(),
+            _ => {}
+        };
+    }
+
+    // Place all the player, monsters and items
     place_objects(room, objects, map, first_room, level)
 }
 
@@ -504,6 +533,7 @@ fn make_map(objects: &mut Vec<Object>, level: u32) -> Map {
     assert_eq!(&objects[PLAYER] as *const _, &objects[0] as *const _);
     objects.truncate(1);
 
+    // Generate the map as a series of rooms connected with tunnels
     let mut rooms = vec![];
     for _ in 0..MAX_ROOMS {
         let w = rand::thread_rng().gen_range(ROOM_MIN_SIZE, ROOM_MAX_SIZE + 1);
@@ -538,6 +568,23 @@ fn make_map(objects: &mut Vec<Object>, level: u32) -> Map {
             rooms.push(new_room);
         }
     }
+    // Relax some of the rough edges
+    for x in 2..MAP_WIDTH-2 {
+        for y in 2..MAP_HEIGHT-2 {
+            let mut walls = 0;
+            for dx in (x - 1) .. (x + 2) {
+                for dy in (y - 1) .. (y + 2) {
+                    if map[dx as usize][dy as usize].blocked {
+                        walls += 1;
+                    }
+                }
+            }
+            if walls < 5 {
+                map[x as usize][y as usize] = Tile::empty();
+            }
+        }
+    }
+
     let (last_room_x, last_room_y) = rooms[rooms.len() - 1].center();
     let mut stairs = Object::new(
         "stairs down",
@@ -1192,6 +1239,10 @@ Defence: {}",
             }
             DidntTakeTurn
         }
+        (Key {printable: '=', .. }, true) => {
+            uncover_map(game);
+            DidntTakeTurn
+        }
         _ => DidntTakeTurn
     };
     action
@@ -1221,7 +1272,7 @@ fn target_tile(
         let (x, y) = (tcod.mouse.cx as i32, tcod.mouse.cy as i32);
 
         // accept the target if the player clicked in fov, filter by range is specified
-        let in_fov = x < MAP_WIDTH && y < MAP_HEIGHT && tcod.fov.is_in_fov(x, y);
+        let in_fov = x >= 0 && y >= 0 && x < MAP_WIDTH && y < MAP_HEIGHT && tcod.fov.is_in_fov(x, y);
         let in_range = max_range.map_or(true, |range| objects[PLAYER].distance(x, y) <= range);
         if tcod.mouse.lbutton_pressed && in_fov && in_range {
             return Some((x, y))
@@ -1392,6 +1443,14 @@ fn render_bar(
         TextAlignment::Center,
         &format!("{}: {}/{}", name, value, maximum)
     );
+}
+
+fn uncover_map(game: &mut Game) {
+    for y in 0..MAP_HEIGHT {
+        for x in 0..MAP_WIDTH {
+            game.map[x as usize][y as usize].explored = true;
+        }
+    }
 }
 
 fn render_all(tcod: &mut Tcod,
