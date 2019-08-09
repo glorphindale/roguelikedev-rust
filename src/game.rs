@@ -1472,6 +1472,7 @@ fn render_all(tcod: &mut Tcod,
               game: &mut Game,
               fov_recompute: bool,
 ) {
+    tcod.con.set_default_background(colors::BLACK);
     if fov_recompute {
         let player = &objects[PLAYER];
         tcod.fov.compute_fov(player.x, player.y, TORCH_RADIUS, FOV_LIGHT_WALLS, FOV_ALGO);
@@ -1503,6 +1504,9 @@ fn render_all(tcod: &mut Tcod,
                     tcod.con.set_default_background(colors::BLACK);
                     tcod.con.set_char_background(x, y, color, BackgroundFlag::Set);
                 }
+            } else {
+                tcod.con.set_default_foreground(colors::BLACK);
+                tcod.con.set_default_background(colors::BLACK);
             }
         }
     }
