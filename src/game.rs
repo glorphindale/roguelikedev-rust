@@ -41,6 +41,9 @@ impl Tile {
     pub fn wall() -> Self {
         Tile{ blocked: true, block_sight: true, explored: false, }
     }
+    pub fn bushes() -> Self {
+        Tile{ blocked: false, block_sight: true, explored: false, }
+    }
 }
 
 type Map = Vec<Vec<Tile>>;
@@ -479,9 +482,18 @@ impl Rect {
 
 fn create_room(room: Rect, map: &mut Map, objects: &mut Vec<Object>, first_room: bool, level: u32) {
     // Just a rectangle
+    let tiles = &mut [
+        Weighted { item: false, weight: 10 },
+        Weighted { item: true, weight: 90 },
+    ];
+    let tiles_choices = WeightedChoice::new(tiles);
     for x in (room.x1 + 1)..room.x2 {
         for y in (room.y1 + 1)..room.y2 {
-            map[x as usize][y as usize] = Tile::empty();
+            let tile = match tiles_choices.ind_sample(&mut rand::thread_rng()) {
+                false => Tile::bushes(),
+                true => Tile::empty(),
+            };
+            map[x as usize][y as usize] = tile;
         }
     }
     // Let's add some chaos to the boring rectangular room
@@ -574,12 +586,14 @@ fn make_map(objects: &mut Vec<Object>, level: u32) -> Map {
             let mut walls = 0;
             for dx in (x - 1) .. (x + 2) {
                 for dy in (y - 1) .. (y + 2) {
-                    if map[dx as usize][dy as usize].blocked {
+                    let tile = map[dx as usize][dy as usize];
+                    if tile.blocked && tile.block_sight {
                         walls += 1;
                     }
                 }
             }
-            if walls < 5 {
+            let tile = map[x as usize][y as usize];
+            if walls < 5 && tile.blocked {
                 map[x as usize][y as usize] = Tile::empty();
             }
         }
@@ -759,7 +773,7 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map, first_room: b
         }
         let mut monster = match monster_choice.ind_sample(&mut rand::thread_rng()) {
             "orc" => {
-                let mut orc = Object::new("Orc", x, y, '0', colors::DESATURATED_GREEN, true);
+                let mut orc = Object::new("Orc", x, y, '0', colors::LIGHT_GREEN, true);
                 orc.fighter = Some(Fighter {
                     hp: 20,
                     base_max_hp: 20,
@@ -772,7 +786,7 @@ fn place_objects(room: Rect, objects: &mut Vec<Object>, map: &Map, first_room: b
                 orc
             }
             "troll" => {
-                let mut troll = Object::new("Troll", x, y, 'T', colors::DARKER_GREEN, true);
+                let mut troll = Object::new("Troll", x, y, 'T', colors::RED, true);
                 troll.fighter = Some(Fighter {
                     hp: 30,
                     base_max_hp: 30,
@@ -1106,10 +1120,10 @@ const LEVEL_SCREEN_WIDTH: i32 = 40;
 const BAR_WIDTH: i32 = 20;
 const PANEL_HEIGHT: i32 = 7;
 const PANEL_Y: i32 = SCREEN_HEIGHT - PANEL_HEIGHT;
-const COLOR_DARK_WALL: colors::Color = colors::Color    { r: 0,     g: 0,   b: 100 };
-const COLOR_LIGHT_WALL: colors::Color = colors::Color   { r: 130,   g: 110, b: 50 };
-const COLOR_DARK_GROUND: colors::Color = colors::Color  { r: 50,    g: 50,  b: 150 };
-const COLOR_LIGHT_GROUND: colors::Color = colors::Color { r: 200,   g: 180, b: 50 };
+const COLOR_DARK_WALL: colors::Color = colors::Color    { r: 20,     g: 20,   b: 20 };
+const COLOR_LIGHT_WALL: colors::Color = colors::Color   { r: 80,   g: 80, b: 50 };
+const COLOR_DARK_GROUND: colors::Color = colors::Color  { r: 80,    g: 50,  b: 50 };
+const COLOR_LIGHT_GROUND: colors::Color = colors::Color { r: 130,   g: 130, b: 80 };
 const MSG_X: i32 = BAR_WIDTH + 2;
 const MSG_WIDTH: i32 = SCREEN_WIDTH - BAR_WIDTH - 2;
 const MSG_HEIGHT: usize = PANEL_HEIGHT as usize - 1;
@@ -1466,8 +1480,8 @@ fn render_all(tcod: &mut Tcod,
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
             let visible = tcod.fov.is_in_fov(x, y);
-            let wall = game.map[x as usize][y as usize].block_sight;
-            let color = match (visible, wall) {
+            let tile = game.map[x as usize][y as usize];
+            let color = match (visible, tile.block_sight) {
                 // Outside of FOV
                 (false, true) => COLOR_DARK_WALL,
                 (false, false) => COLOR_DARK_GROUND,
@@ -1480,7 +1494,15 @@ fn render_all(tcod: &mut Tcod,
                 *explored = true;
             }
             if *explored {
-                tcod.con.set_char_background(x, y, color, BackgroundFlag::Set);
+                if !tile.blocked && tile.block_sight {
+                    // Draw a bush
+                    tcod.con.set_default_foreground(colors::DARK_GREEN);
+                    tcod.con.set_default_background(COLOR_DARK_GROUND);
+                    tcod.con.put_char(x, y, '*', BackgroundFlag::Set);
+                } else {
+                    tcod.con.set_default_background(colors::BLACK);
+                    tcod.con.set_char_background(x, y, color, BackgroundFlag::Set);
+                }
             }
         }
     }
