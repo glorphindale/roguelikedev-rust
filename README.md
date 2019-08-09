@@ -5,6 +5,8 @@
 
 [Rust version of the tutorial](https://tomassedovic.github.io/roguelike-tutorial/part-2-object-map.html) using tcod-rs.
 
+![Current look](Screenshot.png?raw=true "Current look")
+
 
 ### Requirements
 
