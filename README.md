@@ -13,7 +13,9 @@
 Builds requires libsdl2-dev.
 
 Font Bisasam_16x16.png taken from [Dwarf Fortress wiki](https://dwarffortresswiki.org/index.php/File:Bisasam_16x16.png).
+
 Font Cheepicus_15x15.png taken from [Dwarf Fortress wiki](https://dwarffortresswiki.org/Tileset_repository).
+
 Font courier12x12_aa_tc taken from [libtcod-rs](https://github.com/bhelyer/libtcod-d/tree/master/data/fonts)
 
 
@@ -22,6 +24,7 @@ Font courier12x12_aa_tc taken from [libtcod-rs](https://github.com/bhelyer/libtc
 Run:
 
 > cargo run --release  # to use default tcod font
+
 > cargo run FONT_NAME  # to use some other font
 
 ### Known issues
